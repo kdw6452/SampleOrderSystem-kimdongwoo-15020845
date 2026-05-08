@@ -120,20 +120,40 @@ views/       ──X──▶  controllers/            (import 금지)
 
 - [ ] `views/dto.py` — 표시 전용 dataclass
 
-  | DTO | 필드 |
-  |-----|------|
-  | `SampleDto` | id, name, avg_production_time, yield_rate, stock |
-  | `OrderDto` | id, sample_name, quantity, customer, status |
-  | `ProductionJobDto` | order_id, sample_name, customer, quantity, shortfall, actual_qty, total_time |
-  > 대기 순번(queue position)은 DTO 필드가 아닌 View의 `enumerate` 로 부여한다.
+  | DTO | 필드 | 비고 |
+  |-----|------|------|
+  | `SampleDto` | id: int, name: str, avg_production_time: float, yield_rate: float, stock: int, stock_status: str = "" | stock_status: MonitoringController가 판정 후 채움 ('여유'\|'부족'\|'고갈'). ""이면 View는 해당 열 미표시 |
+  | `OrderDto` | id: int, sample_name: str, quantity: int, customer: str, status: str, stock: int \| None = None | status는 OrderStatus.value(str). stock은 ShippingController가 Sample.stock 현재값으로 채움(None이면 View 미표시) |
+  | `ProductionJobDto` | order_id: int, sample_name: str, customer: str, quantity: int, shortfall: int, actual_qty: int, total_time: float | shortfall은 PRODUCING 주문에 항상 존재(int) |
+  > 대기 순번은 View의 `enumerate(jobs, start=1)`로 부여한다 (1-based).
 
-- [ ] `views/base_view.py` — `BaseView` ABC
-  - `show_samples`, `show_orders`, `show_monitoring`, `show_production_status`, `show_production_queue`
-  - `show_message`, `show_error`, `prompt_input`, `prompt_menu_choice`
+- [ ] `views/base_view.py` — `BaseView` ABC (메서드 시그니처)
+  ```python
+  def show_main_menu(self, samples: list[SampleDto]) -> None: ...   # 시료 요약 + 메뉴 번호 목록
+  def show_samples(self, samples: list[SampleDto]) -> None: ...
+  def show_orders(self, orders: list[OrderDto]) -> None: ...
+  def show_monitoring(self, orders: list[OrderDto], samples: list[SampleDto]) -> None: ...
+  # MonitoringController가 REJECTED를 제외한 4개 상태 주문만 필터링하여 전달, View가 status 필드로 그룹핑 렌더링
+  def show_production_status(self, job: ProductionJobDto | None) -> None: ...
+  def show_production_queue(self, jobs: list[ProductionJobDto]) -> None: ...  # enumerate로 대기 순번 부여
+  def show_message(self, message: str) -> None: ...
+  # show_message()는 주문 생성 결과(ID + RESERVED), 주문 승인/거절 결과,
+  # 생산 완료 결과(ID + CONFIRMED), 출고 완료 결과(차감 재고 + RELEASE) 등
+  # 단순 1회성 알림에 범용 사용한다. 메인 메뉴 입력 오류는 show_error()로 처리.
+  def show_error(self, message: str) -> None: ...
+  def prompt_input(self, prompt: str) -> str: ...
+  def prompt_menu_choice(self, prompt: str) -> str: ...
+  ```
 
 - [ ] `views/console_view.py` — `ConsoleView` 구현체
-  - `print()` / `input()` 독점 사용
+  - `print()` / `input()` 독점 사용. `rich` 모듈 import는 `show_monitoring()` 내부로만 한정
   - View는 입력값을 타입 변환하지 않음 — 원시 `str` 반환
+  - `show_monitoring()`만 Rich Table 필수 (주문량 Table 1개 + 재고량 Table 1개, 상태별 그룹핑). 나머지는 plain `print()`
+  - `show_production_status()`: shortfall(부족분) 열 표시함 (PRD §5-6 생산 현황 항목)
+  - `show_production_queue()`: `shortfall` 열 표시 안 함 (대기 순번·주문ID·시료명·고객명·수량·실생산량·총시간만 표시)
+  - 정상 흐름 결과(성공·안내)는 `show_message()`, 입력 오류·상태 위반은 `show_error()` 사용
+  - `show_main_menu(samples)`: 빈 리스트이면 "등록된 시료가 없습니다" 출력 후 메뉴 목록 표시
+  - 메뉴 입력 오류 후 재표시 루프는 `MainController`의 while 루프가 담당 (View에 루프 없음)
 
 ---
 
@@ -167,7 +187,7 @@ views/       ──X──▶  controllers/            (import 금지)
   - 생산량 계산: `actual_qty = ceil(shortfall / (yield_rate × 0.9))`, `total_time = avg_production_time × actual_qty`
   - 생산 현황: `get_by_status(PRODUCING)` 첫 번째 항목 표시
   - 대기 큐: `get_by_status(PRODUCING)`을 주문 ID 오름차순(FIFO)으로 표시
-  - 생산 완료 명령: 현재 생산 중(`PRODUCING`) 첫 번째 주문을 `CONFIRMED`로 전이, `stock += shortfall` (수동 트리거, 비동기 없음)
+  - 생산 완료 명령: 현재 생산 중(`PRODUCING`) 첫 번째 주문을 `CONFIRMED`로 전이, `stock += shortfall` (수동 트리거, 비동기 없음). 주문의 `shortfall`이 None이면 `ValueError` 발생
 
 - [ ] `controllers/main_controller.py`
   - 메인 루프: 전체 시료 요약 표시 후 메뉴 번호 입력 대기 (시료 없을 때도 요약 영역 표시)
