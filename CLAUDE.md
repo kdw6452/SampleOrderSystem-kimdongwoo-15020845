@@ -39,8 +39,6 @@ flake8 models/ views/ controllers/ tests/
 # 타입 체크
 mypy models/ views/ controllers/
 
-# 더미 데이터 생성 (테스트용)
-python -m dummygen seed --scenario basic
 ```
 
 ## 도메인 핵심 제약
@@ -50,6 +48,8 @@ python -m dummygen seed --scenario basic
 - **생산라인은 시료를 한 번에 하나씩 순차 생산**한다 — 병렬 생산 없음.
 - **주문된 시료에 한해서만** 생산을 진행한다 — 재고 충분 시 생산 불필요.
 - **고객은 시스템에 직접 접근하지 않는다** — 주문담당자가 콘솔에서 대리 입력.
+- **생산 완료 시 재고 증가량은 shortfall** — `stock += shortfall` (shortfall = 주문 수량 − 생산 전 재고).
+- **주문 ID는 Repository가 자동 부여하는 단조 증가 정수** — ID 오름차순 = FIFO 보장.
 
 ## 아키텍처
 
@@ -60,21 +60,24 @@ ConsoleMVC_PoC의 MVC 골격 위에 DataPersistence의 JSON Repository와 DataMo
 ```
 main.py  ← Composition Root (모든 의존성 수동 주입)
 ├── controllers/
+│   ├── base_controller.py       # BaseController ABC (run() 추상 메서드)
 │   ├── main_controller.py       # 메인 이벤트 루프, MainMenu Enum 분기
 │   ├── sample_controller.py     # 시료 등록·조회·검색
 │   ├── order_controller.py      # 주문 접수·승인·거절
 │   ├── monitoring_controller.py # 상태별 집계, 재고 현황 (DataMonitor 통합)
-│   ├── shipping_controller.py   # CONFIRMED → SHIPPED 출고
+│   ├── shipping_controller.py   # CONFIRMED → RELEASE 출고
 │   └── production_controller.py # 생산 현황·대기 큐(FIFO) 표시, 실생산량 = ceil(부족분/(수율×0.9))
 ├── models/
 │   ├── sample.py                # Sample 엔티티 (id, name, avg_production_time, yield_rate, stock)
 │   ├── order.py                 # Order 엔티티 + OrderStatus Enum
-│   ├── sample_repository.py     # SampleRepository ABC + JsonRepository 구현
-│   └── order_repository.py      # OrderRepository ABC + JsonRepository 구현
+│   ├── sample_repository.py     # SampleRepository ABC + JsonSampleRepository
+│   └── order_repository.py      # OrderRepository ABC + JsonOrderRepository
 ├── views/
-│   ├── dto.py                   # SampleDto / OrderDto (Model→View 변환 전용)
+│   ├── dto.py                   # SampleDto / OrderDto / ProductionJobDto (Model→View 변환 전용)
 │   ├── base_view.py             # BaseView ABC
 │   └── console_view.py          # ConsoleView 구현체
+├── data/
+│   └── __init__.py
 └── tests/
 ```
 
@@ -92,6 +95,8 @@ RESERVED (주문접수)
 
 전이 규칙은 `OrderRepository.update_status()`가 강제한다 — 허용되지 않은 전이 시 `ValueError`.
 
+`PRODUCING → CONFIRMED` 전이는 생산담당자가 `ProductionController`의 "생산 완료" 명령을 실행할 때 수동으로 트리거된다 (비동기 자동 전이 없음).
+
 ### 계층 간 의존성 규칙
 
 ```
@@ -106,14 +111,14 @@ print() / input() ──X──▶ views/ 외부  (사용 금지)
 ```
 
 - Controller가 Model → DTO 변환을 전담한다.
-- View는 `SampleDto` / `OrderDto`만 수신하며, 원시 `str`만 반환한다.
+- View는 `SampleDto` / `OrderDto` / `ProductionJobDto`만 수신하며, 원시 `str`만 반환한다.
 - `main.py`가 유일한 Composition Root — 모든 구체 클래스를 생성자 주입으로 조립한다.
 
 ### 영속성 (DataPersistence_PoC 패턴)
 
 - 저장 포맷: `data/samples.json`, `data/orders.json`
 - `os.replace()`를 사용한 원자적 쓰기 (중간 상태 노출 방지)
-- `BaseRepository` ABC를 상속한 `JsonRepository`로 구현 — `InMemoryRepository`와 교체 가능
+- `SampleRepository` ABC + `JsonSampleRepository`, `OrderRepository` ABC + `JsonOrderRepository` — 각 도메인별 개별 ABC로 구현. InMemoryRepository는 구현 대상 외(테스트는 `tmp_path` 픽스처로 격리)
 
 ### 모니터링 (DataMonitor_PoC 패턴)
 

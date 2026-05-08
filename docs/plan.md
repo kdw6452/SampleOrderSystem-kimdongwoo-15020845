@@ -44,9 +44,9 @@ views/       ──X──▶  controllers/            (import 금지)
 
 > 목표: 실행 가능한 빈 골격 완성
 
-- [ ] `requirements.txt` 작성 (`pytest`, `pytest-cov`)
+- [ ] `requirements.txt` 작성 (`pytest`, `pytest-cov`, `flake8`, `mypy`)
 - [ ] 패키지 디렉토리 및 `__init__.py` 생성 (`models/`, `views/`, `controllers/`, `tests/`, `data/`)
-- [ ] `.gitignore` 업데이트 (`data/*.json`, `__pycache__/`, `.venv/`, `.coverage`)
+- [ ] `.gitignore` 업데이트: `data/*.json`, `__pycache__/`, `*.pyc`, `.venv/`, `venv/`, `.coverage`, `htmlcov/`, `.pytest_cache/`
 - [ ] `main.py` 빈 진입점 작성 (실행 시 "시스템 시작" 출력 후 종료)
 
 ---
@@ -110,6 +110,8 @@ views/       ──X──▶  controllers/            (import 금지)
 
 > 목표: 모든 콘솔 I/O를 View에 격리
 
+- [ ] `requirements.txt`에 `rich` 추가 (모니터링 렌더러)
+
 - [ ] `views/dto.py` — 표시 전용 dataclass
 
   | DTO | 필드 |
@@ -148,20 +150,22 @@ views/       ──X──▶  controllers/            (import 금지)
 
 - [ ] `controllers/monitoring_controller.py`
   - 주문량: 유효 4개 상태별 목록 표시 (`REJECTED` 제외)
-  - 재고량: 시료별 재고 + 진행 중 주문 수량 합산 → 여유/부족/고갈 판정
+  - 재고량: 시료별 재고 + 진행 중 주문(`RESERVED` + `PRODUCING` + `CONFIRMED`) 수량 합산 → 여유/부족/고갈 판정
 
 - [ ] `controllers/shipping_controller.py`
   - 출고 대기 목록: `get_by_status(CONFIRMED)` 표시
-  - 출고 실행: 재고 차감 → `RELEASE` 전환
+  - 출고 실행: 재고 차감 → `RELEASE` 전환 → 차감된 재고 수량과 전환 결과 화면 표시
 
 - [ ] `controllers/production_controller.py`
   - 생산량 계산: `actual_qty = ceil(shortfall / (yield_rate × 0.9))`, `total_time = avg_production_time × actual_qty`
   - 생산 현황: `get_by_status(PRODUCING)` 첫 번째 항목 표시
   - 대기 큐: `get_by_status(PRODUCING)`을 주문 ID 오름차순(FIFO)으로 표시
+  - 생산 완료 명령: 현재 생산 중(`PRODUCING`) 첫 번째 주문을 `CONFIRMED`로 전이, `stock += shortfall` (수동 트리거, 비동기 없음)
 
 - [ ] `controllers/main_controller.py`
-  - 메인 루프: 전체 시료 요약 표시 후 메뉴 번호 입력 대기
+  - 메인 루프: 전체 시료 요약 표시 후 메뉴 번호 입력 대기 (시료 없을 때도 요약 영역 표시)
   - `MainMenu` Enum 분기 → 하위 컨트롤러 `run()` 호출
+  - 목록에 없는 번호 입력 시 오류 메시지 출력 후 메뉴 재표시
 
 ---
 
@@ -184,6 +188,7 @@ views/       ──X──▶  controllers/            (import 금지)
 | `tests/test_shipping_controller.py` | `ShippingController` | `MagicMock` |
 | `tests/test_production_controller.py` | `ProductionController` (생산량 계산 포함) | `MagicMock` |
 | `tests/test_monitoring_controller.py` | `MonitoringController` (재고 상태 판정) | `MagicMock` |
+| `tests/test_main_controller.py` | `MainController` (메뉴 라우팅) | `MagicMock` |
 
 - [ ] 커버리지 확인: `pytest --cov=. --cov-report=term-missing` → Controller·Model ≥ 80%
 
@@ -201,7 +206,7 @@ views/       ──X──▶  controllers/            (import 금지)
 
 - [ ] `python main.py` 실행 시 5개 메뉴 모두 진입 및 기본 흐름 동작
 - [ ] 주문 상태 전이 규칙 위반 시 `ValueError` → `view.show_error()` 출력
-- [ ] `print()` / `input()` 이 `views/` 패키지 외부에 존재하지 않음
+- [ ] `print()` / `input()` 이 `views/` 패키지 외부에 존재하지 않음 (Phase 1 `main.py`의 임시 `print()` 제외 — Phase 4 완료 시 제거)
 - [ ] `models/` 내 파일에 `from views` / `from controllers` import 없음
 - [ ] `pytest` 전체 통과
 - [ ] `pytest --cov` Controller·Model 커버리지 ≥ 80%
