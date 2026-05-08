@@ -13,7 +13,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `ConsoleMVC_PoC` | MVC 골격 — 5개 메뉴 도메인 구조 |
 | `DataPersistence_PoC` | JSON 파일 기반 영속성 — Repository 패턴, 원자적 쓰기 |
 | `DataMonitor_PoC` | 실시간 콘솔 모니터링 — JSON 파일 폴링, Rich 렌더러 |
-| `DummyDataGenerator_PoC` | 테스트용 더미 데이터 생성 — 재현 가능한 시나리오 데이터셋 |
 
 ## 개발 명령어
 
@@ -48,7 +47,7 @@ mypy models/ views/ controllers/
 - **생산라인은 시료를 한 번에 하나씩 순차 생산**한다 — 병렬 생산 없음.
 - **주문된 시료에 한해서만** 생산을 진행한다 — 재고 충분 시 생산 불필요.
 - **고객은 시스템에 직접 접근하지 않는다** — 주문담당자가 콘솔에서 대리 입력.
-- **shortfall은 주문 승인 시점에 계산하여 Order에 저장** — `shortfall = quantity - stock` (승인 시점 기준). 생산 완료 시 `stock += order.shortfall`.
+- **shortfall은 주문 승인 시 PRODUCING 분기에서만 계산·저장** — `shortfall = max(0, quantity - stock)` (승인 시점 기준). CONFIRMED 분기에서는 None 유지. 생산 완료 시 `stock += order.shortfall`.
 - **주문 ID는 Repository가 자동 부여하는 단조 증가 정수** — ID 오름차순 = FIFO 보장.
 - **CONFIRMED 상태는 재고 논리 예약 상태** — 물리 재고 차감은 RELEASE 전이 시점(출고 실행)에 발생한다.
 

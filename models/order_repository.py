@@ -46,6 +46,10 @@ class OrderRepository(abc.ABC):
     def update_status(self, order_id: int, new_status: OrderStatus) -> Order:
         """주문 상태를 전이한다. 허용되지 않은 전이 시 ValueError를 발생시킨다."""
 
+    @abc.abstractmethod
+    def update(self, order: Order) -> None:
+        """Order 전체를 덮어쓴다. shortfall 등 필드 변경 후 영속화 용도."""
+
 
 class JsonOrderRepository(OrderRepository):
     """JSON 파일 기반 OrderRepository 구현체.
@@ -99,6 +103,15 @@ class JsonOrderRepository(OrderRepository):
                 self._save(orders)
                 return updated
         raise ValueError(f"Order with id={order_id} not found.")
+
+    def update(self, order: Order) -> None:
+        orders = self._load()
+        for i, o in enumerate(orders):
+            if o.id == order.id:
+                orders[i] = order
+                self._save(orders)
+                return
+        raise ValueError(f"Order with id={order.id} not found.")
 
     # ------------------------------------------------------------------
     # Private helpers

@@ -33,7 +33,7 @@ views/       ──X──▶  controllers/            (import 금지)
 ```
 > 다이어그램은 런타임 의존성만 표시한다. `BaseController` ABC 상속 관계는 생략.
 
-생산 큐는 별도 클래스 없이 Controller 내부 메서드로 구현한다 — `OrderRepository.get_by_status(PRODUCING)`을 주문 ID 오름차순 정렬하여 FIFO를 보장한다.
+생산 큐는 별도 클래스 없이 Controller 내부 메서드로 구현한다 — `OrderRepository.get_by_status(PRODUCING)` 결과를 `ProductionController`가 `sorted(key=lambda o: o.id)`로 정렬하여 FIFO를 보장한다. Repository는 정렬 책임 없음.
 
 ---
 
@@ -97,7 +97,8 @@ views/       ──X──▶  controllers/            (import 금지)
   - 재고 변경: Controller가 Sample 객체의 stock을 수정 후 `update(sample)` 호출
 
 - [ ] `models/order_repository.py` — `OrderRepository` ABC + `JsonOrderRepository`
-  - 메서드: `add(order) -> Order`, `get_all() -> list[Order]`, `get_by_id(id) -> Order | None`, `get_by_status(status) -> list[Order]`, `update_status(order_id, new_status) -> Order`
+  - 메서드: `add(order) -> Order`, `get_all() -> list[Order]`, `get_by_id(id) -> Order | None`, `get_by_status(status) -> list[Order]`, `update_status(order_id, new_status) -> Order`, `update(order) -> None`
+  - `update(order)`: Order 전체를 덮어씀 (shortfall 등 필드 변경 후 영속화 용도)
   - ID는 Repository가 자동 부여하는 단조 증가 정수 (기존 최대 ID + 1, 최초 등록 시 ID = 1, 삭제 후에도 재사용 없음, FIFO 보장)
   - 허용 전이 규칙 강제 (위반 시 `ValueError`)
 
@@ -161,7 +162,8 @@ views/       ──X──▶  controllers/            (import 금지)
 
 > 목표: 입력 해석, Model 갱신, DTO 변환, 에러 처리
 
-- [ ] `controllers/base_controller.py` — `BaseController` ABC (`run()` 추상 메서드)
+- [ ] `controllers/base_controller.py` — `BaseController` ABC
+  - 시그니처: `def run(self) -> None: ...`
 
 - [ ] `controllers/sample_controller.py`
   - 시료 등록: 입력 검증(이름 중복·공백, 수율 0.0 초과~1.0 이하, 생산시간 > 0) → `SampleRepository.add()`
@@ -169,25 +171,29 @@ views/       ──X──▶  controllers/            (import 금지)
   - 시료 검색: 이름 부분 일치 필터링, 공백 검색어는 오류 출력
 
 - [ ] `controllers/order_controller.py`
-  - 주문 접수: 입력 검증 → `RESERVED` 상태로 `OrderRepository.add()`
+  - 주문 접수: 입력 검증 → `RESERVED` 상태로 `OrderRepository.add()` → `show_message(f"주문 {order.id} 접수 완료. 상태: RESERVED")`
   - 접수 목록: `get_by_status(RESERVED)` 표시
   - 주문 승인: 재고 확인 → `CONFIRMED` 또는 `PRODUCING` 분기
-    - `PRODUCING` 전환 시 생산량 계산 후 생산 큐 등록
-  - 주문 거절: `REJECTED` 전환
+    - 재고 충분 → `CONFIRMED` 전환 (Order.shortfall = None 유지), `show_message(f"주문 {order.id} CONFIRMED 전환")`
+    - 재고 부족 → `shortfall = max(0, quantity - stock)` 계산, `order.shortfall = shortfall` 설정, `order_repository.update(order)` 저장, `update_status(PRODUCING)`, `actual_qty = ceil(shortfall / (yield_rate × 0.9))` 계산 후 `show_message(f"주문 {order.id} PRODUCING 전환. 부족분: {shortfall}, 실생산량: {actual_qty}")`로 표시
+  - 주문 거절: `REJECTED` 전환 → `show_message(f"주문 {order.id} REJECTED 전환")`
 
 - [ ] `controllers/monitoring_controller.py`
   - 주문량: 유효 4개 상태별 목록 표시 (`REJECTED` 제외)
-  - 재고량: 시료별 재고 + 진행 중 주문(`RESERVED` + `PRODUCING` + `CONFIRMED`) 수량 합산 → 여유/부족/고갈 판정
+  - 재고량: 시료별로 해당 `sample_id`를 가진 진행 중 주문(`RESERVED`+`PRODUCING`+`CONFIRMED`)의 `quantity` 합산 → 여유/부족/고갈 판정 후 `SampleDto.stock_status` 채워 `show_monitoring()` 호출
 
 - [ ] `controllers/shipping_controller.py`
   - 출고 대기 목록: `get_by_status(CONFIRMED)` 표시
-  - 출고 실행: 재고 차감 → `RELEASE` 전환 → 차감된 재고 수량과 전환 결과 화면 표시
+  - 출고 실행: `update_status(RELEASE)` 먼저 → 성공 후 `sample.stock -= quantity` → `sample_repository.update(sample)` → `show_message(f"주문 {order.id} RELEASE 전환. 차감 수량: {quantity}, 잔여 재고: {sample.stock}")` (상태 전이 실패 시 재고 변동 없음)
 
 - [ ] `controllers/production_controller.py`
-  - 생산량 계산: `actual_qty = ceil(shortfall / (yield_rate × 0.9))`, `total_time = avg_production_time × actual_qty`
-  - 생산 현황: `get_by_status(PRODUCING)` 첫 번째 항목 표시
-  - 대기 큐: `get_by_status(PRODUCING)`을 주문 ID 오름차순(FIFO)으로 표시
-  - 생산 완료 명령: 현재 생산 중(`PRODUCING`) 첫 번째 주문을 `CONFIRMED`로 전이, `stock += shortfall` (수동 트리거, 비동기 없음). 주문의 `shortfall`이 None이면 `ValueError` 발생
+  - 생산량 계산 헬퍼: `_get_producing_sorted()` 내부 메서드로 추출 — `sorted(order_repo.get_by_status(PRODUCING), key=lambda o: o.id)` 반환. 생산 현황·대기 큐·생산 완료 명령에서 공통 사용
+  - `actual_qty = ceil(order.shortfall / (sample.yield_rate × 0.9))`, `total_time = sample.avg_production_time × actual_qty` (ProductionController가 호출 시마다 재계산. shortfall 자체는 재계산하지 않음 — Order에 저장된 값 사용)
+  - 생산 현황: `get_by_status(PRODUCING)` 결과를 ID 오름차순 정렬 후 첫 번째 항목을 ProductionJobDto로 변환하여 `show_production_status()` 호출. 없으면 `show_message("생산 중인 작업이 없습니다")` (단순 상태 안내 → show_message)
+  - 대기 큐: `get_by_status(PRODUCING)` 결과를 ID 오름차순(FIFO) 정렬 후 ProductionJobDto 리스트로 변환하여 `show_production_queue()` 호출
+  - 생산 완료 명령: PRODUCING 주문 없으면 `show_error("생산 중인 작업이 없습니다")` 후 중단 (실행 불가 사전 조건 → guard clause, show_error 사용)
+    - `shortfall`이 None이면 `view.show_error()` 출력 후 처리 중단 (정상 흐름에서 발생 불가 — 방어 코드, 테스트 대상 제외)
+    - 재고 갱신 절차: `get_by_status(PRODUCING)` ID 오름차순 정렬 후 첫 번째 주문 선택 → `update_status(CONFIRMED)` 먼저 → 성공 후 `sample.stock += order.shortfall` → `sample_repository.update(sample)` (상태 전이 실패 시 재고 변동 없음) → `show_message(f"주문 {order.id} CONFIRMED 전환. 재고 +{order.shortfall}")`
 
 - [ ] `controllers/main_controller.py`
   - 메인 루프: 전체 시료 요약 표시 후 메뉴 번호 입력 대기 (시료 없을 때도 요약 영역 표시)
