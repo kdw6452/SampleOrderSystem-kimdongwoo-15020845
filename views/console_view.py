@@ -5,6 +5,8 @@
 # View는 str만 반환하며, 타입 변환을 수행하지 않는다.
 from __future__ import annotations
 
+import unicodedata
+
 from views.base_view import BaseView
 from views.dto import OrderDto, ProductionJobDto, SampleDto
 
@@ -27,6 +29,28 @@ _MONITORING_STATUS_ORDER: list[str] = [
 ]
 
 
+# ------------------------------------------------------------------
+# 전각 문자 너비 헬퍼 (한국어·한자 등 전각 문자는 2칸 차지)
+# ------------------------------------------------------------------
+
+def _w(s: str) -> int:
+    """문자열의 터미널 표시 너비를 반환한다 (전각 2, 반각 1)."""
+    return sum(
+        2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+        for c in s
+    )
+
+
+def _lj(s: str, width: int) -> str:
+    """표시 너비 기준 왼쪽 정렬 패딩."""
+    return s + " " * max(0, width - _w(s))
+
+
+def _rj(s: str, width: int) -> str:
+    """표시 너비 기준 오른쪽 정렬 패딩."""
+    return " " * max(0, width - _w(s)) + s
+
+
 class ConsoleView(BaseView):
     """표준 콘솔 I/O 구현체.
 
@@ -44,17 +68,17 @@ class ConsoleView(BaseView):
         print("  S-Semi 시료 생산 주문 관리 시스템")
         print("==============================")
 
-        # 시료 요약
         print("\n[시료 현황]")
         if not samples:
             print("  등록된 시료가 없습니다")
         else:
-            print(f"  {'ID':<5} {'시료명':<20} {'재고':>6}")
-            print("  " + "-" * 33)
+            # 컬럼 너비: ID=4, 시료명=20(표시), 재고=6
+            hdr = "  " + _lj("ID", 4) + "  " + _lj("시료명", 20) + "  " + _rj("재고", 6)
+            print(hdr)
+            print("  " + "-" * (4 + 2 + 20 + 2 + 6))
             for s in samples:
-                print(f"  {s.id:<5} {s.name:<20} {s.stock:>6}")
+                print("  " + _lj(str(s.id), 4) + "  " + _lj(s.name, 20) + "  " + _rj(str(s.stock), 6))
 
-        # 메뉴 목록
         print("\n[메뉴]")
         for num, label in _MAIN_MENU_ITEMS:
             print(f"  {num}. {label}")
@@ -70,19 +94,35 @@ class ConsoleView(BaseView):
             print("등록된 시료가 없습니다")
             return
 
-        print(f"\n{'ID':<5} {'시료명':<20} {'평균생산시간(분)':>15} {'수율':>8} {'재고':>6}", end="")
-        # stock_status 열은 첫 번째 항목에 값이 있을 때만 헤더 추가
-        has_stock_status = any(s.stock_status for s in samples)
-        if has_stock_status:
-            print(f" {'재고상태':>8}", end="")
-        print()
-        print("-" * (5 + 1 + 20 + 1 + 15 + 1 + 8 + 1 + 6 + (1 + 8 if has_stock_status else 0)))
+        has_status = any(s.stock_status for s in samples)
+
+        # 컬럼 표시 너비
+        C_ID   = 4
+        C_NAME = 20
+        C_TIME = 17   # "평균생산시간(분)" 표시 너비 = 17
+        C_RATE = 8    # "수율" = 4, 데이터 "0.90" = 4 → 8로 여유
+        C_STOCK = 6
+        C_STATUS = 8  # "재고상태" = 8
+
+        sep = "-" * (C_ID + 2 + C_NAME + 2 + C_TIME + 2 + C_RATE + 2 + C_STOCK
+                     + (2 + C_STATUS if has_status else 0))
+
+        row = (_lj("ID", C_ID) + "  " + _lj("시료명", C_NAME) + "  "
+               + _rj("평균생산시간(분)", C_TIME) + "  "
+               + _rj("수율", C_RATE) + "  " + _rj("재고", C_STOCK))
+        if has_status:
+            row += "  " + _rj("재고상태", C_STATUS)
+        print("\n" + row)
+        print(sep)
 
         for s in samples:
-            print(f"{s.id:<5} {s.name:<20} {s.avg_production_time:>15.1f} {s.yield_rate:>8.2f} {s.stock:>6}", end="")
-            if has_stock_status:
-                print(f" {s.stock_status:>8}", end="")
-            print()
+            line = (_lj(str(s.id), C_ID) + "  " + _lj(s.name, C_NAME) + "  "
+                    + _rj(f"{s.avg_production_time:.1f}", C_TIME) + "  "
+                    + _rj(f"{s.yield_rate:.2f}", C_RATE) + "  "
+                    + _rj(str(s.stock), C_STOCK))
+            if has_status:
+                line += "  " + _rj(s.stock_status if s.stock_status else "-", C_STATUS)
+            print(line)
 
     # ------------------------------------------------------------------
     # 주문
@@ -95,16 +135,33 @@ class ConsoleView(BaseView):
             return
 
         has_stock = any(o.stock is not None for o in orders)
-        header = f"{'주문ID':<8} {'시료명':<20} {'고객명':<20} {'수량':>6} {'상태':<12}"
+
+        # 컬럼 표시 너비
+        C_ID     = 6   # "주문ID" = 6
+        C_NAME   = 20
+        C_CUST   = 20
+        C_QTY    = 6   # "수량" = 4
+        C_STATUS = 12  # "상태" = 4, "CONFIRMED" = 9
+        C_STOCK  = 8   # "현재재고" = 8
+
+        sep_len = C_ID + 2 + C_NAME + 2 + C_CUST + 2 + C_QTY + 2 + C_STATUS
         if has_stock:
-            header += f" {'현재재고':>8}"
-        print(f"\n{header}")
-        print("-" * (8 + 1 + 20 + 1 + 20 + 1 + 6 + 1 + 12 + (1 + 8 if has_stock else 0)))
+            sep_len += 2 + C_STOCK
+
+        hdr = (_lj("주문ID", C_ID) + "  " + _lj("시료명", C_NAME) + "  "
+               + _lj("고객명", C_CUST) + "  "
+               + _rj("수량", C_QTY) + "  " + _lj("상태", C_STATUS))
+        if has_stock:
+            hdr += "  " + _rj("현재재고", C_STOCK)
+        print("\n" + hdr)
+        print("-" * sep_len)
 
         for o in orders:
-            line = f"{o.id:<8} {o.sample_name:<20} {o.customer:<20} {o.quantity:>6} {o.status:<12}"
+            line = (_lj(str(o.id), C_ID) + "  " + _lj(o.sample_name, C_NAME) + "  "
+                    + _lj(o.customer, C_CUST) + "  "
+                    + _rj(str(o.quantity), C_QTY) + "  " + _lj(o.status, C_STATUS))
             if has_stock and o.stock is not None:
-                line += f" {o.stock:>8}"
+                line += "  " + _rj(str(o.stock), C_STOCK)
             print(line)
 
     # ------------------------------------------------------------------
@@ -135,7 +192,6 @@ class ConsoleView(BaseView):
         order_table.add_column("수량", justify="right")
         order_table.add_column("상태")
 
-        # 상태별 그룹핑 후 정해진 순서로 출력
         order_map: dict[str, list[OrderDto]] = {s: [] for s in _MONITORING_STATUS_ORDER}
         for o in orders:
             if o.status in order_map:
@@ -167,7 +223,6 @@ class ConsoleView(BaseView):
             stock_table.add_row("—", "—", "등록된 시료가 없습니다")
         else:
             for s in samples:
-                # stock_status 색상 매핑
                 status_text = s.stock_status if s.stock_status else "—"
                 if s.stock_status == "고갈":
                     status_style = "[bold red]고갈[/bold red]"
@@ -191,14 +246,16 @@ class ConsoleView(BaseView):
             print("생산 중인 작업이 없습니다")
             return
 
+        # 레이블 너비를 표시 너비 12로 통일
+        W = 12
         print("\n[현재 생산 중인 작업]")
-        print(f"  주문ID      : {job.order_id}")
-        print(f"  시료명      : {job.sample_name}")
-        print(f"  고객명      : {job.customer}")
-        print(f"  주문 수량   : {job.quantity}")
-        print(f"  부족분      : {job.shortfall}")
-        print(f"  실생산량    : {job.actual_qty}")
-        print(f"  총 생산시간 : {job.total_time:.1f}분")
+        print("  " + _lj("주문ID", W) + f": {job.order_id}")
+        print("  " + _lj("시료명", W) + f": {job.sample_name}")
+        print("  " + _lj("고객명", W) + f": {job.customer}")
+        print("  " + _lj("주문 수량", W) + f": {job.quantity}")
+        print("  " + _lj("부족분", W) + f": {job.shortfall}")
+        print("  " + _lj("실생산량", W) + f": {job.actual_qty}")
+        print("  " + _lj("총 생산시간", W) + f": {job.total_time:.1f}분")
 
     def show_production_queue(self, jobs: list[ProductionJobDto]) -> None:
         """생산 대기 큐를 표시한다. shortfall 열 없음, 1-based 대기 순번 표시."""
@@ -206,14 +263,30 @@ class ConsoleView(BaseView):
             print("대기 중인 생산 작업이 없습니다")
             return
 
+        C_SEQ  = 4   # "순번" = 4
+        C_ID   = 6   # "주문ID" = 6
+        C_NAME = 20
+        C_CUST = 20
+        C_QTY  = 6   # "수량" = 4
+        C_PROD = 8   # "실생산량" = 8
+        C_TIME = 10  # "총시간(분)" = 10
+
+        sep_len = C_SEQ + 2 + C_ID + 2 + C_NAME + 2 + C_CUST + 2 + C_QTY + 2 + C_PROD + 2 + C_TIME
+
+        hdr = (_rj("순번", C_SEQ) + "  " + _lj("주문ID", C_ID) + "  "
+               + _lj("시료명", C_NAME) + "  " + _lj("고객명", C_CUST) + "  "
+               + _rj("수량", C_QTY) + "  " + _rj("실생산량", C_PROD) + "  "
+               + _rj("총시간(분)", C_TIME))
         print("\n[생산 대기 큐]")
-        print(f"{'순번':>4} {'주문ID':<8} {'시료명':<20} {'고객명':<20} {'수량':>6} {'실생산량':>8} {'총시간(분)':>10}")
-        print("-" * (4 + 1 + 8 + 1 + 20 + 1 + 20 + 1 + 6 + 1 + 8 + 1 + 10))
+        print(hdr)
+        print("-" * sep_len)
 
         for seq, job in enumerate(jobs, start=1):
             print(
-                f"{seq:>4} {job.order_id:<8} {job.sample_name:<20} {job.customer:<20} "
-                f"{job.quantity:>6} {job.actual_qty:>8} {job.total_time:>10.1f}"
+                _rj(str(seq), C_SEQ) + "  " + _lj(str(job.order_id), C_ID) + "  "
+                + _lj(job.sample_name, C_NAME) + "  " + _lj(job.customer, C_CUST) + "  "
+                + _rj(str(job.quantity), C_QTY) + "  " + _rj(str(job.actual_qty), C_PROD) + "  "
+                + _rj(f"{job.total_time:.1f}", C_TIME)
             )
 
     # ------------------------------------------------------------------
