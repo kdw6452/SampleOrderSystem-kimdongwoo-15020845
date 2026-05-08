@@ -64,9 +64,20 @@ class ConsoleView(BaseView):
 
     def show_main_menu(self, samples: list[SampleDto]) -> None:
         """시료 요약 정보와 메인 메뉴 번호 목록을 표시한다."""
-        print("\n==============================")
-        print("  S-Semi 시료 생산 주문 관리 시스템")
-        print("==============================")
+        from rich import box
+        from rich.align import Align
+        from rich.console import Console
+        from rich.panel import Panel
+
+        Console().print(
+            Panel(
+                "[bold cyan]S-Semi[/bold cyan]  [white]시료 생산 주문 관리 시스템[/white]",
+                box=box.ROUNDED,
+                border_style="cyan",
+                padding=(1, 4),
+                expand=False,
+            )
+        )
 
         print("\n[시료 현황]")
         if not samples:
