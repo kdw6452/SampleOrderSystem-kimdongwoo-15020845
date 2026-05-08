@@ -23,16 +23,17 @@
 main.py
   └──▶ MainController
          ├──▶ SampleController      ← SampleRepository, BaseView
-         ├──▶ OrderController        ← SampleRepository, OrderRepository, ProductionQueue, BaseView
+         ├──▶ OrderController        ← SampleRepository, OrderRepository, BaseView
          ├──▶ MonitoringController   ← SampleRepository, OrderRepository, BaseView
          ├──▶ ShippingController     ← SampleRepository, OrderRepository, BaseView
-         └──▶ ProductionController   ← OrderRepository, ProductionQueue, BaseView
+         └──▶ ProductionController   ← SampleRepository, OrderRepository, BaseView
 
 models/      ──X──▶  views/, controllers/   (import 금지)
 views/       ──X──▶  controllers/            (import 금지)
 ```
+> 다이어그램은 런타임 의존성만 표시한다. `BaseController` ABC 상속 관계는 생략.
 
-생산 큐(`ProductionQueue`)는 `PRODUCING` 상태 주문을 주문 ID 순(FIFO)으로 조회하여 구현한다 — 별도 저장소 없이 `OrderRepository`에서 파생.
+생산 큐는 별도 클래스 없이 Controller 내부 메서드로 구현한다 — `OrderRepository.get_by_status(PRODUCING)`을 주문 ID 오름차순 정렬하여 FIFO를 보장한다.
 
 ---
 
@@ -45,6 +46,7 @@ views/       ──X──▶  controllers/            (import 금지)
 > 목표: 실행 가능한 빈 골격 완성
 
 - [ ] `requirements.txt` 작성 (`pytest`, `pytest-cov`, `flake8`, `mypy`)
+- [ ] `controllers/base_controller.py` — `BaseController` ABC 빈 파일 생성 (Phase 4에서 내용 구현)
 - [ ] 패키지 디렉토리 및 `__init__.py` 생성 (`models/`, `views/`, `controllers/`, `tests/`, `data/`)
 - [ ] `.gitignore` 업데이트: `data/*.json`, `__pycache__/`, `*.pyc`, `.venv/`, `venv/`, `.coverage`, `htmlcov/`, `.pytest_cache/`
 - [ ] `main.py` 빈 진입점 작성 (실행 시 "시스템 시작" 출력 후 종료)
@@ -64,7 +66,7 @@ views/       ──X──▶  controllers/            (import 금지)
   | `id` | int | Repository 자동 부여 |
   | `name` | str | 고유값 |
   | `avg_production_time` | float | 단위: 분 |
-  | `yield_rate` | float | 0.0 ~ 1.0 |
+  | `yield_rate` | float | 0.0 초과 1.0 이하 |
   | `stock` | int | 기본값 0 |
 
 - [ ] `models/order.py` — `OrderStatus` Enum + `Order` dataclass
@@ -77,22 +79,26 @@ views/       ──X──▶  controllers/            (import 금지)
   | `CONFIRMED` | 출고 대기 |
   | `RELEASE` | 출고 완료 |
 
-  | 필드 | 타입 |
-  |------|------|
-  | `id` | int |
-  | `sample_id` | int |
-  | `quantity` | int |
-  | `customer` | str |
+  | 필드 | 타입 | 비고 |
+  |------|------|------|
+  | `id` | int | Repository 자동 부여 |
+  | `sample_id` | int | |
+  | `quantity` | int | |
+  | `customer` | str | |
+  | `shortfall` | `int \| None` | 승인 시 재고 부족분 (PRODUCING 전환 시 저장, 이외 None) |
   | `status` | OrderStatus |
 
 #### 2-2. Repository
 
 - [ ] `models/sample_repository.py` — `SampleRepository` ABC + `JsonSampleRepository`
-  - CRUD: `add`, `get_all`, `get_by_id`, `get_by_name`
+  - 메서드: `add(sample) -> Sample`, `get_all() -> list[Sample]`, `get_by_id(id) -> Sample | None`, `get_by_name(name) -> Sample | None`, `update(sample) -> None`
+  - ID는 Repository가 자동 부여하는 단조 증가 정수 (기존 최대 ID + 1, 최초 등록 시 ID = 1)
   - `os.replace()` 원자적 쓰기, 저장 경로: `data/samples.json`
+  - 재고 변경: Controller가 Sample 객체의 stock을 수정 후 `update(sample)` 호출
 
 - [ ] `models/order_repository.py` — `OrderRepository` ABC + `JsonOrderRepository`
-  - `add`, `get_all`, `get_by_id`, `get_by_status`, `update_status`
+  - 메서드: `add(order) -> Order`, `get_all() -> list[Order]`, `get_by_id(id) -> Order | None`, `get_by_status(status) -> list[Order]`, `update_status(order_id, new_status) -> Order`
+  - ID는 Repository가 자동 부여하는 단조 증가 정수 (기존 최대 ID + 1, 최초 등록 시 ID = 1, 삭제 후에도 재사용 없음, FIFO 보장)
   - 허용 전이 규칙 강제 (위반 시 `ValueError`)
 
   | 현재 상태 | 허용 전이 |
@@ -110,7 +116,7 @@ views/       ──X──▶  controllers/            (import 금지)
 
 > 목표: 모든 콘솔 I/O를 View에 격리
 
-- [ ] `requirements.txt`에 `rich` 추가 (모니터링 렌더러)
+- [ ] `requirements.txt`에 `rich` 추가 (모니터링 렌더러 — Phase 1에서 의도적으로 제외한 분리 추가)
 
 - [ ] `views/dto.py` — 표시 전용 dataclass
 
@@ -119,6 +125,7 @@ views/       ──X──▶  controllers/            (import 금지)
   | `SampleDto` | id, name, avg_production_time, yield_rate, stock |
   | `OrderDto` | id, sample_name, quantity, customer, status |
   | `ProductionJobDto` | order_id, sample_name, customer, quantity, shortfall, actual_qty, total_time |
+  > 대기 순번(queue position)은 DTO 필드가 아닌 View의 `enumerate` 로 부여한다.
 
 - [ ] `views/base_view.py` — `BaseView` ABC
   - `show_samples`, `show_orders`, `show_monitoring`, `show_production_status`, `show_production_queue`
@@ -137,9 +144,9 @@ views/       ──X──▶  controllers/            (import 금지)
 - [ ] `controllers/base_controller.py` — `BaseController` ABC (`run()` 추상 메서드)
 
 - [ ] `controllers/sample_controller.py`
-  - 시료 등록: 입력 검증(이름 중복·공백, 수율 범위, 생산시간 양수) → `SampleRepository.add()`
+  - 시료 등록: 입력 검증(이름 중복·공백, 수율 0.0 초과~1.0 이하, 생산시간 > 0) → `SampleRepository.add()`
   - 시료 조회: `get_all()` → `SampleDto` 변환 → `view.show_samples()`
-  - 시료 검색: 이름 부분 일치 필터링
+  - 시료 검색: 이름 부분 일치 필터링, 공백 검색어는 오류 출력
 
 - [ ] `controllers/order_controller.py`
   - 주문 접수: 입력 검증 → `RESERVED` 상태로 `OrderRepository.add()`
