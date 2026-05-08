@@ -176,21 +176,37 @@ class ConsoleView(BaseView):
         """모니터링 화면을 Rich Table로 표시한다.
 
         rich import는 이 메서드 내부로만 한정한다.
-        - 주문량 Table: RESERVED/PRODUCING/CONFIRMED/RELEASE 순 그룹
-        - 재고량 Table: 시료명·재고·재고상태
+        - 주문량 Table: RESERVED/PRODUCING/CONFIRMED/RELEASE 순 그룹, 상태 색상 코딩
+        - 재고량 Table: 시료명·재고·재고상태 아이콘
         """
+        from rich import box
         from rich.console import Console
         from rich.table import Table
 
         console = Console()
 
+        # 상태별 Rich 마크업 스타일
+        _STATUS_STYLE: dict[str, str] = {
+            "RESERVED":  "bold blue",
+            "PRODUCING": "bold yellow",
+            "CONFIRMED": "bold green",
+            "RELEASE":   "dim",
+        }
+
         # ── 주문량 Table ──────────────────────────────────────────────
-        order_table = Table(title="주문 현황 (REJECTED 제외)", show_header=True, header_style="bold cyan")
-        order_table.add_column("주문ID", justify="right", style="dim")
-        order_table.add_column("시료명")
-        order_table.add_column("고객명")
-        order_table.add_column("수량", justify="right")
-        order_table.add_column("상태")
+        order_table = Table(
+            title="주문 현황",
+            box=box.ROUNDED,
+            header_style="bold",
+            title_style="bold cyan",
+            show_lines=False,
+            expand=False,
+        )
+        order_table.add_column("상태", min_width=10, no_wrap=True)
+        order_table.add_column("주문ID", justify="right", style="dim", min_width=6)
+        order_table.add_column("시료명", min_width=12)
+        order_table.add_column("고객명", min_width=10)
+        order_table.add_column("수량", justify="right", min_width=4)
 
         order_map: dict[str, list[OrderDto]] = {s: [] for s in _MONITORING_STATUS_ORDER}
         for o in orders:
@@ -199,42 +215,62 @@ class ConsoleView(BaseView):
 
         for status in _MONITORING_STATUS_ORDER:
             group = order_map[status]
+            sty = _STATUS_STYLE.get(status, "")
             if group:
-                for o in group:
+                for idx, o in enumerate(group):
+                    # 동일 상태 첫 번째 행에만 상태 레이블 표시
+                    status_cell = f"[{sty}]{status}[/{sty}]" if idx == 0 else ""
                     order_table.add_row(
+                        status_cell,
                         str(o.id),
                         o.sample_name,
                         o.customer,
                         str(o.quantity),
-                        o.status,
                     )
             else:
-                order_table.add_row("—", "—", "—", "—", f"{status} (없음)")
+                order_table.add_row(
+                    f"[dim]{status}[/dim]",
+                    "[dim]—[/dim]",
+                    "[dim](없음)[/dim]",
+                    "",
+                    "",
+                )
 
+        console.print()
         console.print(order_table)
 
         # ── 재고량 Table ──────────────────────────────────────────────
-        stock_table = Table(title="재고 현황", show_header=True, header_style="bold cyan")
+        stock_table = Table(
+            title="재고 현황",
+            box=box.ROUNDED,
+            header_style="bold",
+            title_style="bold cyan",
+            expand=False,
+        )
         stock_table.add_column("시료명")
-        stock_table.add_column("재고", justify="right")
-        stock_table.add_column("재고상태")
+        stock_table.add_column("재고", justify="right", min_width=4)
+        stock_table.add_column("재고 상태", min_width=8)
 
         if not samples:
-            stock_table.add_row("—", "—", "등록된 시료가 없습니다")
+            stock_table.add_row("[dim]등록된 시료 없음[/dim]", "", "")
         else:
             for s in samples:
-                status_text = s.stock_status if s.stock_status else "—"
                 if s.stock_status == "고갈":
-                    status_style = "[bold red]고갈[/bold red]"
+                    status_markup = "[bold red]● 고갈[/bold red]"
+                    stock_markup = f"[bold red]{s.stock}[/bold red]"
                 elif s.stock_status == "부족":
-                    status_style = "[yellow]부족[/yellow]"
+                    status_markup = "[yellow]▲ 부족[/yellow]"
+                    stock_markup = f"[yellow]{s.stock}[/yellow]"
                 elif s.stock_status == "여유":
-                    status_style = "[green]여유[/green]"
+                    status_markup = "[green]✓ 여유[/green]"
+                    stock_markup = f"[green]{s.stock}[/green]"
                 else:
-                    status_style = status_text
-                stock_table.add_row(s.name, str(s.stock), status_style)
+                    status_markup = s.stock_status or "—"
+                    stock_markup = str(s.stock)
+                stock_table.add_row(s.name, stock_markup, status_markup)
 
         console.print(stock_table)
+        console.print()
 
     # ------------------------------------------------------------------
     # 생산라인
