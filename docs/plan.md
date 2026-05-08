@@ -209,6 +209,8 @@ views/       ──X──▶  controllers/            (import 금지)
 #### 5-1. Composition Root
 
 - [ ] `main.py` — 모든 Repository·View·Controller를 생성자 주입으로 조립
+  - 조립 대상: `JsonSampleRepository`, `JsonOrderRepository`, `ConsoleView`
+  - 컨트롤러 의존성은 CLAUDE.md §계층 구조 다이어그램 기준 (Phase 4에서 구현 완료)
 
 #### 5-2. 테스트
 
@@ -223,7 +225,7 @@ views/       ──X──▶  controllers/            (import 금지)
 | `tests/test_monitoring_controller.py` | `MonitoringController` (재고 상태 판정) | `MagicMock` |
 | `tests/test_main_controller.py` | `MainController` (메뉴 라우팅) | `MagicMock` |
 
-- [ ] 커버리지 확인: `pytest --cov=. --cov-report=term-missing` → Controller·Model ≥ 80%
+- [ ] 커버리지 확인: `pytest --cov=models --cov=controllers --cov-report=term-missing --cov-fail-under=80` → 전체 평균 ≥ 80% (views/, tests/ 제외)
 
 #### 5-3. 수동 통합 확인
 
@@ -231,7 +233,7 @@ views/       ──X──▶  controllers/            (import 금지)
 - [ ] 황금 경로 시나리오 실행
   1. 시료 등록 → 주문 접수 → 재고 충분 승인 → 출고
   2. 시료 등록 → 주문 접수 → 재고 부족 승인 → 생산 큐 확인 → 생산 완료(수동) → 출고
-  3. 주문 접수 → 거절 → 모니터링에서 미표시 확인
+  3. (시나리오 1에서 등록한 시료 재사용) 주문 접수 → 거절 → 모니터링에서 미표시 확인
 
 ---
 
@@ -239,7 +241,9 @@ views/       ──X──▶  controllers/            (import 금지)
 
 - [ ] `python main.py` 실행 시 5개 메뉴 모두 진입 및 기본 흐름 동작
 - [ ] 주문 상태 전이 규칙 위반 시 `ValueError` → `view.show_error()` 출력
-- [ ] `print()` / `input()` 이 `views/` 패키지 외부에 존재하지 않음 (Phase 1 `main.py`의 임시 `print()` 제외 — Phase 4 완료 시 제거)
+- [ ] `print()` / `input()` 이 `views/` 패키지 외부에 존재하지 않음 (Phase 4에서 임시 `print()` 제거 완료 — PowerShell: `Get-ChildItem -Recurse controllers,models -Filter *.py | ForEach-Object { Select-String -Path $_.FullName -Pattern 'print\(|input\(' }` 로 확인. `main.py`는 Composition Root이므로 제외)
 - [ ] `models/` 내 파일에 `from views` / `from controllers` import 없음
 - [ ] `pytest` 전체 통과
-- [ ] `pytest --cov` Controller·Model 커버리지 ≥ 80%
+- [ ] `pytest --cov=models --cov=controllers --cov-report=term-missing --cov-fail-under=80` Controller·Model 전체 평균 ≥ 80%
+- [ ] `flake8 models/ views/ controllers/` 린트 통과
+- [ ] `mypy models/ views/ controllers/` 타입 체크 통과

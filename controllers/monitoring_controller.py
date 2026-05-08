@@ -5,7 +5,6 @@ from __future__ import annotations
 from controllers.base_controller import BaseController
 from models.order import Order, OrderStatus
 from models.order_repository import OrderRepository
-from models.sample import Sample
 from models.sample_repository import SampleRepository
 from views.base_view import BaseView
 from views.dto import OrderDto, SampleDto

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 가상의 반도체 회사 S-Semi가 시료(Sample) 생산·주문 관리를 엑셀/메모장에서 벗어나 체계화하기 위해 개발하는 콘솔 기반 시스템. 고객(연구소·팹리스·대학)의 주문을 접수하여 웨이퍼 공정 설비를 거쳐 출고까지의 전 흐름을 관리한다.
 
-이 프로젝트는 동일 저장소 내 4개의 PoC를 통합하여 완성된다:
+이 프로젝트는 동일 저장소 내 3개의 PoC를 통합하여 완성된다 (DummyDataGenerator_PoC는 범위 외):
 
 | PoC | 역할 |
 |-----|------|
@@ -29,8 +29,11 @@ pytest
 # 단일 테스트
 pytest tests/test_order_controller.py::TestOrderController::test_approve_order
 
-# 커버리지 포함
+# 커버리지 포함 (전체)
 pytest --cov=. --cov-report=term-missing
+
+# 커버리지 수용 기준 확인 (Controller·Model 전체 평균 ≥ 80%)
+pytest --cov=models --cov=controllers --cov-report=term-missing --cov-fail-under=80
 
 # 린트
 flake8 models/ views/ controllers/ tests/
@@ -131,4 +134,4 @@ print() / input() ──X──▶ views/ 외부  (사용 금지)
 - 메뉴 상수는 `enum.Enum` 사용
 - Controller 내 에러 처리: `try/except` → `view.show_error()` 출력
 - 테스트: Controller는 `MagicMock`으로 격리, Repository는 `pytest`의 `tmp_path` 픽스처로 JSON 파일 격리
-- 커버리지 목표: Controller·Model ≥ 80%
+- 커버리지 목표: Controller·Model 전체 평균 ≥ 80% (`--cov-fail-under=80`)
